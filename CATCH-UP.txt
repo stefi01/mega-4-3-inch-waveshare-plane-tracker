@@ -1,0 +1,32 @@
+Mega 4.3 version 1.0. Published 23 Nov 2026.
+CHECK reads ota/version_43.txt. INSTALL reads ota/mega43.bin.
+The app bin for the flash download tool is sketch\mega_43\mega_43.ino.esp32s3.bin at address 0x10000.
+Field lists 6 planes per page and has a NEXT PAGE button. Traffic lists 8 per page.
+A landing city is dropped when the airplane is moving and that airport is more than 90 degrees off the nose.
+This is the Freenove FNK0115B, 4.3 inch, 480x272. It is not the Waveshare 7 inch.
+
+Sketch: mega_43\sketch\mega_43\mega_43.ino
+The 7 inch sketch was not edited. Final_3.5.ino was not edited.
+
+Board, leave these alone
+Clock 9000000. Bounce 272 * 20. Rotation 2.
+Porches H 0, 8, 4, 43 and V 0, 8, 4, 12.
+Pins DE 40, VSYNC 41, HSYNC 39, PCLK 42.
+Red 45, 48, 47, 21, 14. Green 5, 6, 7, 15, 16, 4. Blue 8, 3, 46, 9, 1.
+Backlight is GPIO 2, analogWrite. There is no CH422 lamp on this board.
+Touch is XPT2046. SPI.begin before ts.begin. Rotation 0.
+Two samples, 4 ms apart. Drop them if they differ by more than 20.
+Raw map x 3800 to 170, y 250 to 3800, then flip both axes.
+Map photos are copied in 1024-byte chunks, drawn twice, and thrown away if the two signatures differ.
+This sketch does not restart the panel after Wi-Fi.
+
+Product
+Version 1.0. Prefs name mega43, so Factory does not clear the old Home Field Scope or the 7 inch Mega.
+Updates: https://github.com/stefi01/mega-4-3-inch-waveshare-plane-tracker
+CHECK reads ota/version_43.txt. INSTALL reads ota/mega43.bin.
+Do not upload the 7 inch ws7.bin onto this glass.
+Range is 10 to 250 NM, step 10, default 50. 50 NM is the radius, so the circle is 100 NM across.
+Ships are optional and start off. Green triangles sit on the same rings as the planes.
+Location is a 5-digit zip or a 4-letter airport code. CLEAR wipes the pad. DEL removes one character.
+The clock uses the time zone already saved for that place. There is no extra summer-time hour and no SUMMER or WINTER chip.
+SAT, STREET, zoom, drag, list, detail, night sky, ISS, launches, storm, and the screen saver are still in the sketch.

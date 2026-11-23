@@ -1,0 +1,22 @@
+MEGA 4.3 — examples this sketch is built from
+Compile sketch\mega_43\mega_43.ino. That is the product. The examples below are only the board and library demos the pin list and the picture decode came from. They are not a second tracker.
+
+  Freenove ESP32-S3 4.3 inch display demo, board FNK0115B
+    The RGB panel pins, 9000000 clock, 272 * 20 bounce, and XPT2046 touch in mega_43.ino match that board.
+    Do not copy a Waveshare 7 inch clock, bounce, porch, or touch map onto this file.
+
+  GFX Library for Arduino → PDQgraphicstest
+    File → Examples → GFX Library for Arduino → PDQgraphicstest
+    Use it only to see that the library draws. Do not copy its pins onto this sketch.
+
+  TJpg_Decoder examples
+    File → Examples → TJpg_Decoder
+    The tracker uses the callback form: a jpeg in memory, one block at a time, into the map buffer.
+
+  XPT2046_Touchscreen examples
+    File → Examples → XPT2046_Touchscreen
+    The tracker uses two samples, 4 ms apart, and drops the touch if they differ by more than 20.
+
+Header that ships with the sketch:
+  sketch\mega_43\iss_world.h
+    The ISS earth picture. It is included by mega_43.ino. Leave it in the same folder as the sketch.

@@ -1,0 +1,36 @@
+MEGA 4.3 — libraries to install
+Arduino IDE Library Manager. Search the left name. Install that row. Do not use a different copy.
+
+  GFX Library for Arduino     Moon
+    Include: Arduino_GFX_Library.h
+    Arduino 1.8: the folder on disk must be named GFX_Library_for_Arduino.
+    This build used 1.6.8.
+
+  ArduinoJson                 Benoit Blanchon
+    Include: ArduinoJson.h
+    This build used 7.4.2.
+
+  TJpg_Decoder                Bodmer
+    Include: TJpg_Decoder.h
+    This build used 1.1.0.
+
+  XPT2046_Touchscreen         Paul Stoffregen
+    Include: XPT2046_Touchscreen.h
+    This build used 1.4.
+    A spare copy is in library\XPT2046_Touchscreen.
+    Leave that copy outside the sketch folder. A second copy beside mega_43.ino compiles twice.
+
+These come with the esp32 board package. Do not install them from Library Manager.
+
+  WiFi.h
+  WiFiClientSecure.h
+  HTTPClient.h
+  HTTPUpdate.h
+  Preferences.h
+  SPI.h
+  SD.h
+  Wire.h
+  esp_ota_ops.h
+
+Do not search Library Manager for ILI9341, ST7789, or WiFi. This screen is RGB, not SPI.
+Do not install the GT911 library. This board is the XPT2046 touch.
