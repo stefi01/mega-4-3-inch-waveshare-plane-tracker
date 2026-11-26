@@ -1,41 +1,6 @@
-Mega 4.3 version 1.0
-Sketch: sketch\mega_43\mega_43.ino
-Screen: Freenove FNK0115B, 4.3 inch, 480 by 272, XPT2046 touch.
-GitHub updates: https://github.com/stefi01/mega-4-3-inch-waveshare-plane-tracker
-Arduino IDE on this build: 1.8.18. Board package: esp32 by Espressif, 3.3.12.
+Flash Download Tool 3.9.3. These are the boxes in that program.
+This is not the Arduino IDE Tools menu.
 
-This is not the Waveshare 7 inch. USB CDC On Boot stays Enabled. The 7 inch uses Disabled.
-
-
-Arduino Tools menu
-
-Board: ESP32S3 Dev Module
-PSRAM: OPI PSRAM
-Flash Size: 16MB (128Mb)
-USB CDC On Boot: Enabled
-Partition Scheme: 16M Flash (3MB APP/9.9MB FATFS)
-Upload Speed: 921600
-USB Mode: Hardware CDC and JTAG
-USB Firmware MSC On Boot: Disabled
-USB DFU On Boot: Disabled
-Upload Mode: UART0 / Hardware CDC
-CPU Frequency: 240MHz (WiFi)
-Flash Mode: QIO 80MHz
-Core Debug Level: None
-Erase All Flash Before Sketch Upload: Disabled
-JTAG Adapter: Disabled
-Arduino Runs On: Core 1
-Events Run On: Core 1
-Zigbee Mode: Disabled
-
-Port: the COM port that appears when the cable is in the Type-C socket. That port is a CH340. This board has no UART1 switch. Do not hold BOOT.
-
-Click Upload in Arduino. When it finishes, the screen restarts on its own.
-
-
-Flash Download Tool 3.9.3
-
-This is the bin uploader. These boxes are not the Arduino Tools menu.
 Open flash_download_tool_3.9.3.exe.
 
 First window
@@ -44,18 +9,20 @@ First window
   ChipType: ESP32-S3
   Click OK.
 
-Big window, SPIDownload
+Big window, SPIDownload tab
   SPI SPEED: 80MHz
   SPI MODE: DIO
   DoNotChgBin: ticked
   LockSettings: left unticked
   BAUD: 115200
 
-Tick one file row. Address: 0x10000
-Choose sketch\mega_43\mega_43.ino.esp32s3.bin
-That is the same file as ota\mega43.bin.
-Do not choose a file with bootloader, partitions, or merged in the name.
-Do not press ERASE.
+Tick all four rows. The files are in this same folder.
 
-COM is the CH340 port. Click START. Wait until the box says FINISH.
-Cable in the Type-C port. No UART switch. Leave BOOT alone.
+  tick  mega_43.ino.bootloader.bin    address 0x0
+  tick  mega_43.ino.partitions.bin    address 0x8000
+  tick  boot_app0.bin                 address 0xe000
+  tick  mega_43.ino.esp32s3.bin       address 0x10000
+
+Do not press ERASE.
+COM is the CH340 port. Cable in the Type-C socket. No UART switch. Leave BOOT alone.
+Click START. Wait until the box says FINISH.
