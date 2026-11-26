@@ -104,6 +104,7 @@ bool wifiShift = false;
 bool wifiSym = false;
 bool wifiScanBusy = false;
 char wifiMsg[28] = "";
+uint32_t wifiRedrawAt = 0;
 uint32_t lastTouch = 0;
 
 float homeLat = 36.7762f;
@@ -154,7 +155,7 @@ uint16_t *issShade = nullptr;
 bool issMapOk = false;
 uint32_t lastIssMapTry = 0;
 uint32_t lastFetch = 0;
-enum { NET_NONE = 0, NET_PLANES, NET_MAP, NET_ISS_MAP, NET_FACTS, NET_WX, NET_LAUNCH, NET_OTA, NET_STORM, NET_SHIPS, NET_ZIP, NET_CODE };
+enum { NET_NONE = 0, NET_PLANES, NET_MAP, NET_ISS_MAP, NET_FACTS, NET_WX, NET_LAUNCH, NET_OTA, NET_STORM, NET_SHIPS, NET_ZIP, NET_CODE, NET_TZ };
 uint8_t otaKind = 0;
 char otaLatest[12] = "";
 char otaMsg[44] = "";
@@ -172,6 +173,12 @@ uint8_t factsTries = 0;
 uint32_t lastPlanesAt = 0;
 char planesErr[20] = "";
 uint32_t lastWx = 0;
+int sunDay = -1;
+int sunDst = -2;
+char tzSaved[40] = "";
+bool tzDirty = false;
+uint32_t lastTz = 0;
+uint32_t lastTzKeep = 0;
 uint32_t lastSweep = 0;
 uint32_t lastIssPos = 0;
 uint32_t lastIssTry = 0;
@@ -580,6 +587,11 @@ void statusLine(const char *s) {
 }
 
 void applyHomeTz() {
+  if (tzSaved[0]) {
+    setenv("TZ", tzSaved, 1);
+    tzset();
+    return;
+  }
   const char *tz = "EST5EDT,M3.2.0,M11.1.0";
   float la = homeLat, lo = homeLon;
   if (la >= 18.5f && la <= 22.5f && lo <= -154.5f && lo >= -160.5f)
@@ -640,6 +652,7 @@ void loadPrefs() {
   stormOn = prefs.getBool("storm", false);
   unitsF = prefs.getBool("units", true);
   summerTime = prefs.getBool("sumr", true);
+  strlcpy(tzSaved, prefs.getString("tz", "").c_str(), sizeof(tzSaved));
   showMarks = prefs.getBool("marks", true);
   dayMode = prefs.getBool("dayv", false);
   saverMin = prefs.getInt("saver", 0);
@@ -667,6 +680,7 @@ void writeScopeSettings() {
   prefs.putBool("storm", stormOn);
   prefs.putBool("units", unitsF);
   prefs.putBool("sumr", summerTime);
+  prefs.putString("tz", tzSaved);
   prefs.putBool("marks", showMarks);
   prefs.putBool("ships", shipsOn);
   prefs.putString("zip", zipCode);
@@ -794,6 +808,15 @@ void syncFieldPick() {
   if (i >= 0) fieldPick = i;
 }
 
+void dropZone() {
+  tzSaved[0] = 0;
+  sunDay = -1;
+  sunDst = -2;
+  lastTz = 0;
+  strlcpy(sunUp, "--:--", sizeof(sunUp));
+  strlcpy(sunDn, "--:--", sizeof(sunDn));
+}
+
 void useHomeField(int i) {
   if (i < 0) return;
   int n = 0;
@@ -804,6 +827,7 @@ void useHomeField(int i) {
   homeLat = homeFields[i].lat;
   homeLon = homeFields[i].lon;
   lastPassAt = 0;
+  dropZone();
   applyHomeTz();
 }
 
@@ -827,6 +851,7 @@ void refreshGeo() {
   lastWx = 0;
   lastAstro = 0;
   lastPassAt = 0;
+  dropZone();
   applyHomeTz();
   nPlanes = 0;
   if (mapOn) {
@@ -1437,8 +1462,9 @@ void bbox(float &minLon, float &minLat, float &maxLon, float &maxLat) {
   float c = cosf(homeLat * 0.0174533f);
   if (c < 0.3f) c = 0.3f;
   int rr = rangeNm > 0 ? rangeNm : 1;
-  float halfW = (float)CX * (float)rr / (float)RR;
-  float halfH = (float)CY * (float)rr / (float)RR;
+  int span = (rr * 3 + 1) / 2;
+  float halfW = (float)CX * (float)span / (float)RR;
+  float halfH = (float)CY * (float)span / (float)RR;
   float dLon = halfW / (60.0f * c);
   float dLat = halfH / 60.0f;
   minLon = homeLon - dLon;
@@ -2878,6 +2904,141 @@ bool liveClock(time_t *out) {
   return true;
 }
 
+bool wxDue() {
+  return (uint32_t)(millis() - lastWx) >= 6UL * 3600UL * 1000UL;
+}
+
+static float sunUtcHour(float lat, float lng, int yday, bool rise) {
+  const float deg = 0.0174532925f;
+  float n = (float)(yday + 1);
+  float lngHour = lng / 15.0f;
+  float t = rise ? n + ((6.0f - lngHour) / 24.0f) : n + ((18.0f - lngHour) / 24.0f);
+  float m = (0.9856f * t) - 3.289f;
+  float l = m + (1.916f * sinf(m * deg)) + (0.020f * sinf(2.0f * m * deg)) + 282.634f;
+  l = fmodf(l, 360.0f);
+  if (l < 0) l += 360.0f;
+  float ra = atan2f(0.91764f * sinf(l * deg), cosf(l * deg)) / deg;
+  ra = fmodf(ra, 360.0f);
+  if (ra < 0) ra += 360.0f;
+  ra = (ra + (floorf(l / 90.0f) * 90.0f - floorf(ra / 90.0f) * 90.0f)) / 15.0f;
+  float sinDec = 0.39782f * sinf(l * deg);
+  float cosDec = cosf(asinf(sinDec));
+  float cosH = (cosf(90.833f * deg) - sinDec * sinf(lat * deg)) / (cosDec * cosf(lat * deg));
+  if (cosH > 1.0f || cosH < -1.0f) return -1.0f;
+  float h = rise ? 360.0f - acosf(cosH) / deg : acosf(cosH) / deg;
+  h /= 15.0f;
+  float ut = h + ra - (0.06571f * t) - 6.622f - lngHour;
+  ut = fmodf(ut, 24.0f);
+  if (ut < 0) ut += 24.0f;
+  return ut;
+}
+
+static void putSunLocal(float utcH, char *dst) {
+  if (utcH < 0) {
+    strlcpy(dst, "--:--", 8);
+    return;
+  }
+  time_t now = time(nullptr);
+  struct tm g, loc;
+  gmtime_r(&now, &g);
+  localtime_r(&now, &loc);
+  int day = loc.tm_yday - g.tm_yday;
+  if (day > 1) day = -1;
+  if (day < -1) day = 1;
+  int mins = (int)lroundf(utcH * 60.0f) + (loc.tm_hour - g.tm_hour) * 60 + (loc.tm_min - g.tm_min) + day * 1440;
+  mins %= 1440;
+  if (mins < 0) mins += 1440;
+  snprintf(dst, 8, "%02d:%02d", mins / 60, mins % 60);
+}
+
+void fillSunLocal(time_t now) {
+  struct tm ti;
+  localtime_r(&now, &ti);
+  putSunLocal(sunUtcHour(homeLat, homeLon, ti.tm_yday, true), sunUp);
+  putSunLocal(sunUtcHour(homeLat, homeLon, ti.tm_yday, false), sunDn);
+}
+
+void tickSun() {
+  if (!lastTzKeep || (uint32_t)(millis() - lastTzKeep) > 3600000UL || (uint32_t)millis() < 120000UL) {
+    if (!lastTzKeep || (uint32_t)(millis() - lastTzKeep) > 5000UL) {
+      lastTzKeep = millis();
+      applyHomeTz();
+    }
+  }
+  time_t now;
+  if (!liveClock(&now)) return;
+  struct tm ti;
+  localtime_r(&now, &ti);
+  bool blank = !sunUp[0] || sunUp[0] == '-';
+  bool first = sunDay < 0;
+  bool dayChanged = !first && sunDay != ti.tm_yday;
+  bool dstChanged = sunDst != -2 && sunDst != ti.tm_isdst;
+  if (!first && !dayChanged && !dstChanged) return;
+  if (first || dstChanged) applyHomeTz();
+  localtime_r(&now, &ti);
+  sunDay = ti.tm_yday;
+  sunDst = ti.tm_isdst;
+  bool wrote = blank || dayChanged || dstChanged;
+  if (wrote) fillSunLocal(now);
+  if (wifiLinked() && (dayChanged || dstChanged || (first && blank))) askNet(NET_WX);
+  if (wrote && page == PG_CLOCK) drawClock();
+}
+
+void storeZone(const char *posix) {
+  if (!posix || !posix[0]) return;
+  if (strcmp(tzSaved, posix)) {
+    strlcpy(tzSaved, posix, sizeof(tzSaved));
+    tzDirty = true;
+  }
+  applyHomeTz();
+}
+
+void fetchPlaceTz() {
+  char url[120];
+  snprintf(url, sizeof(url), "https://timeapi.io/api/TimeZone/coordinate?latitude=%.4f&longitude=%.4f",
+           homeLat, homeLon);
+  String body;
+  if (!httpGet(url, body, 8000)) return;
+  const char *s = body.c_str();
+  char zone[48] = "";
+  jsonKey(s, s + body.length(), "\"timeZone\":", zone, sizeof(zone));
+  if (!strcmp(zone, "America/Los_Angeles") || !strcmp(zone, "America/Vancouver"))
+    storeZone("PST8PDT,M3.2.0,M11.1.0");
+  else if (!strcmp(zone, "America/Denver") || !strcmp(zone, "America/Boise") || !strcmp(zone, "America/Edmonton"))
+    storeZone("MST7MDT,M3.2.0,M11.1.0");
+  else if (!strcmp(zone, "America/Phoenix"))
+    storeZone("MST7");
+  else if (!strcmp(zone, "America/Chicago") || !strcmp(zone, "America/Winnipeg"))
+    storeZone("CST6CDT,M3.2.0,M11.1.0");
+  else if (!strcmp(zone, "America/New_York") || !strcmp(zone, "America/Toronto") || !strcmp(zone, "America/Detroit"))
+    storeZone("EST5EDT,M3.2.0,M11.1.0");
+  else if (!strcmp(zone, "America/Anchorage"))
+    storeZone("AKST9AKDT,M3.2.0,M11.1.0");
+  else if (!strcmp(zone, "Pacific/Honolulu"))
+    storeZone("HST10");
+  else if (!strcmp(zone, "America/Puerto_Rico"))
+    storeZone("AST4");
+  else {
+    const char *off = strstr(s, "\"currentUtcOffset\"");
+    const char *sec = off ? strstr(off, "\"seconds\":") : nullptr;
+    if (!sec) return;
+    int seconds = atoi(sec + 10);
+    int west = -seconds;
+    int sign = west < 0 ? -1 : 1;
+    west = abs(west);
+    int hh = west / 3600;
+    int mm = (west % 3600) / 60;
+    char posix[28];
+    if (sign < 0)
+      snprintf(posix, sizeof(posix), "LCL-%d:%02d", hh, mm);
+    else if (mm)
+      snprintf(posix, sizeof(posix), "LCL%d:%02d", hh, mm);
+    else
+      snprintf(posix, sizeof(posix), "LCL%d", hh);
+    storeZone(posix);
+  }
+}
+
 const char *lookWord(int az) {
   static const char *d[] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
   int i = (az + 22) / 45;
@@ -3587,17 +3748,18 @@ static void prepMapScale() {
     mapSY = 256;
     return;
   }
-  int s = (int)((256L * rr + mapNm / 2) / mapNm);
+  int span = (mapNm * 3 + 1) / 2;
+  int s = (int)((256L * rr + span / 2) / span);
   if (s < 1) s = 1;
   mapSX = s;
   mapSY = s;
 }
-static bool mapSrcHit(int v, int origin, int scale, int limit, int &out) {
+static int mapSrcCoord(int v, int origin, int scale, int limit) {
   int d = v - origin;
   int s = origin + (int)(((long)d * scale + (d < 0 ? -128 : 128)) / 256);
-  if ((unsigned)s >= (unsigned)limit) return false;
-  out = s;
-  return true;
+  if (s < 0) s = 0;
+  if (s >= limit) s = limit - 1;
+  return s;
 }
 
 void blitMap() {
@@ -3612,13 +3774,8 @@ void blitMap() {
   }
   uint16_t row[PW];
   for (int y = 0; y < MAP_H; y++) {
-    int sy = 0;
-    bool yHit = mapSrcHit(y, CY, mapSY, MAP_H, sy);
-    for (int x = 0; x < PW; x++) {
-      int sx = 0;
-      if (!yHit || !mapSrcHit(x, CX, mapSX, PW, sx)) row[x] = COL_BG;
-      else row[x] = mapFb[sy * PW + sx];
-    }
+    int sy = mapSrcCoord(y, CY, mapSY, MAP_H);
+    for (int x = 0; x < PW; x++) row[x] = mapFb[sy * PW + mapSrcCoord(x, CX, mapSX, PW)];
     gfx->draw16bitRGBBitmap(0, y, row, PW, 1);
   }
 }
@@ -3647,13 +3804,9 @@ void restoreRect(int x, int y, int w, int h) {
   }
   uint16_t line[PW];
   for (int yy = 0; yy < h; yy++) {
-    int sy = 0;
-    bool yHit = mapSrcHit(y + yy, CY, mapSY, MAP_H, sy);
-    for (int xx = 0; xx < w; xx++) {
-      int sx = 0;
-      if (!yHit || !mapSrcHit(x + xx, CX, mapSX, PW, sx)) line[xx] = COL_BG;
-      else line[xx] = mapFb[sy * PW + sx];
-    }
+    int sy = mapSrcCoord(y + yy, CY, mapSY, MAP_H);
+    for (int xx = 0; xx < w; xx++)
+      line[xx] = mapFb[sy * PW + mapSrcCoord(x + xx, CX, mapSX, PW)];
     gfx->draw16bitRGBBitmap(x, y + yy, line, w, 1);
   }
 }
@@ -4062,11 +4215,10 @@ void mapPut(int x, int y) {
   uint16_t c = COL_BG;
   if (mapOk && mapFb) {
     prepMapScale();
-    int sx = 0, sy = 0;
     if (mapSX == 256 && mapSY == 256)
       c = mapFb[y * PW + x];
-    else if (mapSrcHit(x, CX, mapSX, PW, sx) && mapSrcHit(y, CY, mapSY, MAP_H, sy))
-      c = mapFb[sy * PW + sx];
+    else
+      c = mapFb[mapSrcCoord(y, CY, mapSY, MAP_H) * PW + mapSrcCoord(x, CX, mapSX, PW)];
   }
   gfx->drawPixel(x, y, c);
 }
@@ -4426,14 +4578,15 @@ void askNet(int job) {
   if (holdNet() && job != NET_ZIP && job != NET_CODE) return;
   if (netBusy || netJob) {
     if (job == NET_OTA) netPend = NET_OTA;
-    else if (job == NET_FACTS && netPend != NET_OTA) netPend = NET_FACTS;
-    else if (job == NET_ISS_MAP && netPend != NET_FACTS && netPend != NET_OTA) netPend = NET_ISS_MAP;
-    else if (job == NET_WX && netPend != NET_OTA) netPend = NET_WX;
+    else if (job == NET_FACTS && netPend != NET_OTA && netPend != NET_TZ) netPend = NET_FACTS;
+    else if (job == NET_ISS_MAP && netPend != NET_FACTS && netPend != NET_OTA && netPend != NET_TZ) netPend = NET_ISS_MAP;
+    else if (job == NET_WX && netPend != NET_OTA && netPend != NET_TZ) netPend = NET_WX;
+    else if (job == NET_TZ && netPend != NET_OTA && netPend != NET_WX) netPend = NET_TZ;
     else if (job == NET_MAP && netPend != NET_FACTS && netPend != NET_ISS_MAP && netPend != NET_OTA &&
-             netPend != NET_WX)
+             netPend != NET_WX && netPend != NET_TZ)
       netPend = NET_MAP;
     else if ((job == NET_LAUNCH || job == NET_STORM || job == NET_SHIPS) && (!netPend || netPend == NET_PLANES)) netPend = job;
-    else if ((job == NET_ZIP || job == NET_CODE) && netPend != NET_OTA) netPend = job;
+    else if ((job == NET_ZIP || job == NET_CODE) && netPend != NET_OTA && netPend != NET_TZ) netPend = job;
     else if (!netPend) netPend = job;
     return;
   }
@@ -4469,6 +4622,7 @@ void netTask(void *pv) {
       else if (job == NET_FACTS && selected >= 0 && selected < nPlanes)
         fetchAircraft(planes[selected]);
       else if (job == NET_WX) fetchMetar();
+      else if (job == NET_TZ) fetchPlaceTz();
       else if (job == NET_LAUNCH) fetchLaunches();
       else if (job == NET_OTA) runOtaJob();
       else if (job == NET_STORM) fetchStorm();
@@ -4513,6 +4667,16 @@ void takeNetResult() {
     char now[96];
     clockStampNow(now, sizeof(now));
     if (strcmp(now, clockStamp)) drawClock();
+  } else if (j == NET_TZ) {
+    lastTz = millis();
+    if (tzDirty) {
+      tzDirty = false;
+      savePrefs();
+      sunDay = -1;
+      sunDst = -2;
+      strlcpy(sunUp, "--:--", sizeof(sunUp));
+      strlcpy(sunDn, "--:--", sizeof(sunDn));
+    } else if (page == PG_CLOCK) drawClock();
   } else if (j == NET_LAUNCH && page == PG_LAUNCH) {
     drawLaunch();
   } else if (j == NET_OTA && page == PG_ABOUT) {
@@ -5815,6 +5979,7 @@ void tapSettings(int x, int y) {
         homeLat = zipHits[i].lat;
         homeLon = zipHits[i].lon;
         lastPassAt = 0;
+        dropZone();
         applyHomeTz();
         savePrefs();
         snprintf(zipMsg, sizeof(zipMsg), "%s", zipHits[i].city);
@@ -5829,24 +5994,28 @@ void tapSettings(int x, int y) {
     } else if (hit(x, y, 288, 164, 372, 188)) {
       homeLat = constrain(homeLat + 0.02f, -70.0f, 70.0f);
       lastPassAt = 0;
+      dropZone();
       applyHomeTz();
       savePrefs();
       drawSettings();
     } else if (hit(x, y, 384, 164, 468, 188)) {
       homeLat = constrain(homeLat - 0.02f, -70.0f, 70.0f);
       lastPassAt = 0;
+      dropZone();
       applyHomeTz();
       savePrefs();
       drawSettings();
     } else if (hit(x, y, 288, 196, 372, 220)) {
       homeLon = constrain(homeLon - 0.02f, -179.0f, 179.0f);
       lastPassAt = 0;
+      dropZone();
       applyHomeTz();
       savePrefs();
       drawSettings();
     } else if (hit(x, y, 384, 196, 468, 220)) {
       homeLon = constrain(homeLon + 0.02f, -179.0f, 179.0f);
       lastPassAt = 0;
+      dropZone();
       applyHomeTz();
       savePrefs();
       drawSettings();
@@ -6067,6 +6236,7 @@ void applyGeo() {
   else
     homeLon = constrain(v, -179.0f, 179.0f);
   lastPassAt = 0;
+  dropZone();
   applyHomeTz();
   int known = findHomeField(homeIcao);
   if (known >= 0 &&
@@ -6285,8 +6455,9 @@ void applyWifiSave() {
 void openWifi() {
   wifiFocus = wifiSsid[0] ? 1 : 0;
   wifiMsg[0] = 0;
-  startWifiScan();
   drawWifi();
+  startWifiScan();
+  wifiRedrawAt = millis() ? millis() : 1;
 }
 
 void pushHist() {
@@ -6629,6 +6800,8 @@ void connectWifi() {
   lastLaunch = 0;
   drawScope();
   askNet(NET_WX);
+  askNet(NET_TZ);
+  lastTz = millis();
   askNet(NET_PLANES);
 }
 
@@ -6658,6 +6831,9 @@ void setup() {
   }
   if (!screenGapAfter) screenGapAfter = (uint8_t *)psAlloc(1024);
   gfx->setTextWrap(false);
+  gfx->fillScreen(COL_BG);
+  delay(80);
+  gfx->fillScreen(COL_BG);
 
   httpLockInit();
   initSd();
@@ -6670,6 +6846,10 @@ void setup() {
 
 void loop() {
   pollWifiScan();
+  if (wifiRedrawAt && page == PG_WIFI && millis() - wifiRedrawAt > 250UL) {
+    wifiRedrawAt = 0;
+    drawWifi();
+  }
   int xs[2], ys[2];
   int nTouch = readTouch(xs, ys, 2);
   if (nTouch) lastIdle = millis();
@@ -6753,9 +6933,14 @@ void loop() {
     drawIss();
   }
   if (page == PG_WX && millis() - lastWx > 600000UL) askNet(NET_WX);
-  if ((page == PG_CLOCK || page == PG_WX) && wifiLinked() && clockNeedsWx() && millis() - lastWx > 8000UL)
-    askNet(NET_WX);
+  if (wifiLinked() && clockNeedsWx() && millis() - lastWx > 8000UL) askNet(NET_WX);
   else if (page == PG_CLOCK && wifiLinked() && millis() - lastWx > 60000UL) askNet(NET_WX);
+  else if (wifiLinked() && wxDue()) askNet(NET_WX);
+  if (wifiLinked() && (!lastTz || (uint32_t)(millis() - lastTz) > 43200000UL)) {
+    askNet(NET_TZ);
+    if (netJob == NET_TZ || netPend == NET_TZ) lastTz = millis();
+  }
+  tickSun();
   if (page == PG_LAUNCH &&
       ((!launchOk && millis() - lastLaunchTry > 8000UL) ||
        (launchOk && millis() - lastLaunch > 60000UL)))
